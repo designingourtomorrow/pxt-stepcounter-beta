@@ -1,0 +1,11 @@
+{
+    "name": "stepcounter",
+    "dependencies": {
+        "core": "*"
+    },
+    "description": "Simple stepcounter functions for the micro:bit",
+    "files": [
+        "README.md",
+        "stepcounter.ts"
+    ]
+}
