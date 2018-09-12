@@ -7,7 +7,7 @@
 /**
  * Custom blocks
  */
-//% weight=100 color=#444A84 icon="\uf051" advanced=false block="DOT Step Counter"
+//% weight=100 color=#444A84 icon="\uf051" advanced=false block="DOT Step TEST"
 namespace stepcounter {
     //background variables
     let secretSteps: number = 0                     // our actual step count
