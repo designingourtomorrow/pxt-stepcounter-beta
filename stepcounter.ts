@@ -158,6 +158,7 @@ namespace stepcounter {
             // start sample array
             blankSampleArray()
             while (1) {
+                signal = getAccelStrength()
                 processLatestSample()
             }
             basic.pause(10)
