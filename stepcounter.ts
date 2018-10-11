@@ -160,8 +160,8 @@ namespace stepcounter {
             while (1) {
                 signal = getAccelStrength()
                 processLatestSample()
+                basic.pause(10)
             }
-            basic.pause(10)
         }
 
     
