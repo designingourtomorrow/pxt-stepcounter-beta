@@ -11,33 +11,51 @@
 namespace stepcounter {
     //background variables
     let sampleRate: number = 20                     // samples PER SECOND to take from the accelerometer
+    let sampleLengthMS: number = 2000
+    let sampleIntervalMS: number = Math.round(1000 / sampleRate)
+
+    let minimumStepThreshold: number = 3            // number of steps before we decide we are walking
+    let tempStepCount: number = 0                   // how many possible but not certain steps we have taken
 
     let secretSteps: number = 0                     // our actual step count
     let sampleArray: number[] = []                  // accelerometer readings
-    let lastStepTime: number = 0                    // when we last had a step
-    let rate: number[] = []
-    let minStrength: number = 8192                  // accelerometer strength varies so max/min are used
-    let maxStrength: number = 0                     // to calculate a threshold value for different people
-    let minTime: number = 800                       // milliseconds within which two peaks are /not/ two steps
-    let maybeSteps: number[] = [0, 0, 0]            // array of minimal number of steps (three) we should count
-    let thresholdMultiplier: number = 0.58          // percentage of max at which we start to be sure a thing is a step
-    let stepThreshold: number = 1500                // initial threshold of strength
-    let thresh: number = stepThreshold              // moving threshold
-    let sampleIntervalMS: number = 1000 / sampleRate
-    let singleStepTime: number = 200
-    let sampleCounter: number = 0
-    let Peak: number = 512
-    let Trough: number = 512
-    let amp: number = 100
-    let firstStep: boolean = true                   // }  This represents which step we are looking for next.
-    let secondStep: boolean = false                 // }  We don't want to start counting steps at every movement.
-    let thirdStep: boolean = false                  // }  We could also represent this as Steps [0, 0, 0] but names are easy to follow.
-    let stepping: boolean = false                   // Are we actually in a set of steps right now?
-    let signal: number = 0                          // This is the number we'll usually be working on
+    let smoothedValues: number[] = []
+
+    let lastStepTime: number = 0                    // when we last had a step (how many milliseconds since the micro:bit woke up)
+    let rate: number[] = []                         // Holds step rate, which is not massively useful frankly
+
+    let rising: number = 0
+
+    let minTime: number = 500                       // milliseconds within which two peaks are /not/ two steps
+
+    let stepThresholdMultiplier: number = 58        // percentage of max at which we start to be sure a thing is a step
+    let stepThreshold: number = 100                 // initial stepThreshold of strength, later moves
+    // Not going to use this YET: let singleStepTime: number = 500                // This is a tricky thing to guess, but we need to.  Should set per user.
+    let maximumStepTime: number = 2000
+    let sampleTimer: number = 0
+    let Peak: number = 0
+    let Trough: number = 2000
+    let amp: number = 0
+
+    for (let i = 0; i < sampleLengthMS / sampleIntervalMS; i++) {
+        sampleArray.push(stepThreshold)
+        smoothedValues.push(stepThreshold)
+    }
+
+    //% block
+    export function getRising() {
+        return rising
+    }
+
+    //% block
+    export function getStepThreshold() {
+        return stepThreshold
+    }
+
     /**
-    * helper function for mapping in integers
-    * we use this instead of 'map' because we always want to scale to 25, so we use this to make it easy behind the scenes
-    */
+   * helper function for mapping in integers
+   * we use this instead of 'map' because we always want to scale to 25, so we use this to make it easy behind the scenes
+   */
     export function integerMap(value: number, inputLow: number, inputHigh: number, outputLow: number, outputHigh: number): number {
         return (value - inputLow) * (outputHigh - outputLow) / (inputHigh - inputLow) + outputLow
     }
@@ -48,15 +66,27 @@ namespace stepcounter {
     * @param value describe value here eg: 216
     * @param target describe target here eg: 10000
     */
-    // block "map to 25 using low of $value and high of $target"
+    //% block "map to 25 using low of $value and high of $target"
     export function mapTo25(value: number, target: number): number {
         return integerMap(value, 0, target, 0, 25) - 1
+    }
+
+    function resetStep() {
+        tempStepCount = 0
+        sampleTimer = 0
+        Peak = 512
+        Trough = 512
+        lastStepTime = input.runningTime()
+        amp = 0
+        sampleTimer = 0
     }
 
     /**
     * returns square root of added squares of 3 directions
     * Accel Strength is pythagorean and therefore mostly rotation-agnostic.
     */
+    //% block="accelStrength"
+    //% advanced=true
     export function getAccelStrength(): number {
         let X: number = input.acceleration(Dimension.X)
         let Y: number = input.acceleration(Dimension.Y)
@@ -65,106 +95,163 @@ namespace stepcounter {
     }
 
     /**
-    * used primarily once we move the sample data to where we will examine it to see if there is a 'step' in there
+    * time between samples (ms)
     */
-    export function blankSampleArray(): void {
-        sampleArray = []
+    //% block="sample interval (ms)"
+    export function getSampleInterval() {
+        return sampleIntervalMS
+    }
+
+    //% block
+    export function getAmp(): number {
+        return amp
     }
 
     /**
-    * randomise steps for testing, up to target
+    * returns  calculated stepThreshold
     */
-    // block="random number for testing"
-    export function randomiseSteps(): void {
-        secretSteps = Math.randomRange(0, 250)
+    //% block="stepThreshold"
+    //% advanced=true
+    export function getstepThreshold(): number {
+        return stepThreshold
     }
 
+    //% block="get last from sampleArray"
+    //% advanced=true
+    export function getLastSample() {
+        return sampleArray[sampleArray.length - 1]
+    }
+
+    //% block="get last from smoothedValues"
+    //% advanced=true
+    export function getLastSmoothedValue() {
+        return smoothedValues[smoothedValues.length - 1]
+    }
+
+    /** 
+    * move stepThreshold to between max and min
+    */
+    //% block="move stepThreshold value: $value, including any scaling factor"
+    //% advanced=true
+    export function movestepThreshold(value: number) {
+        stepThreshold += Math.round((value * stepThresholdMultiplier / 100) / smoothedValues.length)
+        stepThreshold = Math.round(amp * stepThresholdMultiplier / 100) + Trough
+    }
+
+    //% block
+    export function getLatestSample() {
+        sampleArray.push(getAccelStrength())
+        sampleArray.shift()
+    }
+
+    let smoothingCoefficient: number = 3
+
+    //% block
+    //% advanced=true
+    export function smoothSample() {
+        if (sampleArray.length < smoothingCoefficient) {
+            smoothingCoefficient = sampleArray.length
+        }
+        let temp: number = 0
+        for (let i = 0; i < smoothingCoefficient; i++) {
+            temp += sampleArray[sampleArray.length - (smoothingCoefficient + 1) - i] * (smoothingCoefficient - i)
+        }
+        let newSample = Math.round(temp / (smoothingCoefficient * smoothingCoefficient))
+        smoothedValues.push(newSample)
+        if (newSample > Peak) {
+            Peak = newSample
+        }
+        if (newSample < Trough) {
+            Trough = newSample
+        }
+        let discard: number = smoothedValues.shift()
+        if (discard <= Trough) {
+            Trough = Math.min(smoothedValues[0], newSample)
+        }
+
+        if (discard >= Peak) {
+            Peak = Math.max(smoothedValues[0], newSample)
+        }
+        amp = Peak - Trough
+        movestepThreshold(newSample - discard)
+    }
+
+    //% block
+    //% advanced=true
+    export function getPeak() {
+        return Peak
+    }
+
+    //% block
+    //% advanced=true
+    export function getTrough() {
+        return Trough
+    }
+
+    function isValidStepTime(): boolean {
+        if (lastStepTime + minTime < input.runningTime()) {
+            return true
+        }
+        return false
+    }
+
+    /**
+     * set stepThreshold percentage (how hard your leg moves as it swings)
+     * @param value eg: 80
+     */
+    //% block="set stepThreshold Multipler to $value"
+    export function setThresholdMultipler(value: number) {
+        stepThresholdMultiplier = value
+    }
+
+    /**
+     * set time per step in milliseconds (because people walk and run differently)
+     * @param value eg: 500
+     */
+    //% block="set minTime to $value"
+    export function setMinTime(value: number) {
+        minTime = value
+    }
+
+    //% block
     export function processLatestSample() {
-        sampleCounter += sampleIntervalMS
-        let N = sampleCounter - lastStepTime
 
-        if (signal < thresh && N > singleStepTime) {
-            if (signal < Trough) {
-                Trough = signal
-            }
-        }
-        if (signal > thresh && signal > Peak) {
-            Peak = signal
+        smoothSample()  // now we work on smoothedValues instead of the noisy samples
+
+        // checks if the peak in a new sample is really the Peak.
+        if (smoothedValues[smoothedValues.length - 1] > (smoothedValues[smoothedValues.length - 2])) {
+            // we are rising.
+            rising = 1
         }
 
-        if (N > singleStepTime) {
-            if ((signal > thresh) && (stepping == false) && (N > 3 * singleStepTime / 5)) {
-                stepping = true
-                singleStepTime = sampleCounter - lastStepTime
-                lastStepTime = sampleCounter
-
-                if (thirdStep) {
-                    thirdStep = false
-                    secretSteps += 2                        // The two valid steps that came before, which we have not yet counted
-                    for (let i = 0; i < 10; i++) {
-                        rate[i] = singleStepTime
-                    }
-                }
-                if (secondStep) {
-                    secondStep = false
-                    thirdStep = true
-                    return
-                }
-                if (firstStep) {
-                    firstStep = false
-                    secondStep = true
-                    return
-                }
-
-                let runningTotal: number = 0
-                for (let i = 0; i < 9; i++) {
-                    rate[i] = rate[i + 1]
-                    runningTotal += rate[i]
-                }
-                rate[9] = singleStepTime
-                runningTotal += rate[9]
-                singleStepTime = runningTotal / 10            // This improves our original guess
-                stepping = true
-                secretSteps++
-
-            }
-            if (signal < thresh && stepping == true) {          // values are going down
-                stepping = false
-                amp = Peak - Trough
-                thresh = (amp / 2) + Trough
-                Peak = thresh
-                Trough = thresh
-            }
-            if (N > 3000) {
-                thresh = stepThreshold
-                Peak = 512
-                Trough = 512
-                lastStepTime = sampleCounter
-                firstStep = true
-                secondStep = false
-                thirdStep = false
-                stepping = false
-                amp = 100
-            }
+        else if (rising == 1 && isValidStepTime() && amp + Trough > stepThreshold && smoothedValues[smoothedValues.length - 1] < smoothedValues[smoothedValues.length - 2]) {
+            rising = 0
+            secretSteps += areWe()
+            timeStamp()
         }
+        if (sampleTimer > 2000) {
+            resetStep()
+        }
+        // make sure we're definitely timed out since timestamp (lastStepTime)
+        // then record 'we stepped'.
     }
 
-        /**
-        * count steps using accelerometer and update sample array
-        * Simple algorithm for testing
-        */
-        //% block="turn on step counter"
-        export function turnOnCounterForever(): void {
-            // start sample array
-            blankSampleArray()
-            while (1) {
-                signal = getAccelStrength()
-                processLatestSample()
-                basic.pause(10)
-            }
+    function areWe(): number {
+        if (tempStepCount < minimumStepThreshold) {
+            tempStepCount += 1
+            return 0
         }
+        if (tempStepCount == minimumStepThreshold) {
+            tempStepCount += 1
+            return tempStepCount
+        }
+        return 1
+    }
 
-    
+    function timeStamp() {
+        sampleTimer = input.runningTime() - lastStepTime
+        lastStepTime = input.runningTime()
+    }
 
     /**
     * graphs 'number' out of 'target' on the LED screen
