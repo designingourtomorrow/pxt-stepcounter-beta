@@ -19,7 +19,7 @@ namespace stepcounter {
 
     let secretSteps: number = 0                     // our actual step count
     let sampleArray: number[] = []                  // accelerometer readings
-    let smoothedValues: number[] = []
+    let smoothedValues: number[] = []               // slightly smoothed out readings to get rid of local bumpiness
 
     let lastStepTime: number = 0                    // when we last had a step (how many milliseconds since the micro:bit woke up)
     let rate: number[] = []                         // Holds step rate, which is not massively useful frankly
@@ -29,7 +29,7 @@ namespace stepcounter {
     let minTime: number = 500                       // milliseconds within which two peaks are /not/ two steps
 
     let averageAccel: number = 0
-    let stepThreshold: number = 100                 // initial stepThreshold of strength, later moves
+    let triggerOffset: number = 50
     // Not going to use this YET: let singleStepTime: number = 500                // This is a tricky thing to guess, but we need to.  Should set per user.
     let maximumStepTime: number = 2000
     let sampleTimer: number = 0
@@ -38,14 +38,21 @@ namespace stepcounter {
     let amp: number = 0
 
     for (let i = 0; i < sampleLengthMS / sampleIntervalMS; i++) {
-        sampleArray.push(stepThreshold)
-        smoothedValues.push(stepThreshold)
+        sampleArray.push(triggerOffset)
+        smoothedValues.push(triggerOffset)
     }
 
 
-    //% block
-    export function getRising() {
-        return rising
+    /**
+     * sets the sensitivity of the step counter - use a high number if you walk gently
+     * @param value eg: 50
+     */
+    //% block "set sensitivity to $value percent"
+    //% value.min=0
+    //% value.max=100
+    //% advanced=true
+    export function setSensitivity(value: number) {
+        triggerOffset = 100 - value
     }
 
     /**
@@ -78,17 +85,16 @@ namespace stepcounter {
     }
 
     /**
-    * returns (what might or might not be the square root) of added squares of 3 directions
-    * Accel Strength is pythagorean and therefore mostly rotation-agnostic.
+    * returns total acceleration strength, allowing us to do simple zero-crossing in any dimensions
+    * Accel Strength is mostly rotation-agnostic.
     */
-    //% block="accelStrength"
+    //% block="acceleration strength"
     //% advanced=true
     export function getAccelStrength(): number {
         let X: number = input.acceleration(Dimension.X)
         let Y: number = input.acceleration(Dimension.Y)
         let Z: number = input.acceleration(Dimension.Z)
         return X + Y + Z
-        //return Math.sqrt(X * X + Y * Y + Z * Z)
     }
 
     /**
@@ -99,41 +105,32 @@ namespace stepcounter {
         return sampleIntervalMS
     }
 
-    //% block
-    export function getAmp(): number {
-        return amp
-    }
-
     /**
     * returns  calculated stepThreshold
     */
     //% block="stepThreshold"
     //% advanced=true
     export function getStepThreshold(): number {
-        return averageAccel + 50
-    }
-
-    //% block="get last from sampleArray"
-    //% advanced=true
-    export function getRawSample() {
-        return sampleArray[sampleArray.length - 1]
-    }
-
-    //% block="get last from smoothed array"
-    //% advanced=true
-    export function getSmoothedSample() {
-        return smoothedValues[smoothedValues.length - 1]
+        return averageAccel + triggerOffset
     }
 
     /** 
-   * move stepThreshold to between max and min
-   */
-    //% block="move stepThreshold value: $value"
+     * get last item from raw sample array
+     */
+    //% block="raw sample"
     //% advanced=true
-    export function movestepThreshold(value: number) {
-        stepThreshold += Math.round(value)
+    export function getRawSample():number {
+        return sampleArray[sampleArray.length - 1]
     }
 
+    /** 
+     * get last item from smoothed sample array
+     */
+    //% block="smoothed sample"
+    //% advanced=true
+    export function getSmoothedSample():number {
+        return smoothedValues[smoothedValues.length - 1]
+    }
 
 
     //% block
@@ -171,19 +168,6 @@ namespace stepcounter {
         }
         amp = Peak - Trough
         averageAccel += Math.round((newSample / smoothedValues.length) - (discard / smoothedValues.length))
-        movestepThreshold(newSample - discard)
-    }
-
-    //% block
-    //% advanced=true
-    export function getPeak() {
-        return Peak
-    }
-
-    //% block
-    //% advanced=true
-    export function getTrough() {
-        return Trough
     }
 
     function isValidStepTime(): boolean {
