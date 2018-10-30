@@ -91,7 +91,8 @@ namespace stepcounter {
         let X: number = input.acceleration(Dimension.X)
         let Y: number = input.acceleration(Dimension.Y)
         let Z: number = input.acceleration(Dimension.Z)
-        return Math.sqrt(X * X + Y * Y + Z * Z)
+        return X + Y + Z
+        //return Math.sqrt(X * X + Y * Y + Z * Z)
     }
 
     /**
