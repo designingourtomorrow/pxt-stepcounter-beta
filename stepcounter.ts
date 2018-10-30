@@ -28,7 +28,7 @@ namespace stepcounter {
 
     let minTime: number = 500                       // milliseconds within which two peaks are /not/ two steps
 
-    let stepThresholdMultiplier: number = 58        // percentage of max at which we start to be sure a thing is a step
+    let averageAccel: number = 0
     let stepThreshold: number = 100                 // initial stepThreshold of strength, later moves
     // Not going to use this YET: let singleStepTime: number = 500                // This is a tricky thing to guess, but we need to.  Should set per user.
     let maximumStepTime: number = 2000
@@ -42,14 +42,10 @@ namespace stepcounter {
         smoothedValues.push(stepThreshold)
     }
 
+
     //% block
     export function getRising() {
         return rising
-    }
-
-    //% block
-    export function getStepThreshold() {
-        return stepThreshold
     }
 
     /**
@@ -82,7 +78,7 @@ namespace stepcounter {
     }
 
     /**
-    * returns square root of added squares of 3 directions
+    * returns (what might or might not be the square root) of added squares of 3 directions
     * Accel Strength is pythagorean and therefore mostly rotation-agnostic.
     */
     //% block="accelStrength"
@@ -113,31 +109,32 @@ namespace stepcounter {
     */
     //% block="stepThreshold"
     //% advanced=true
-    export function getstepThreshold(): number {
-        return stepThreshold
+    export function getStepThreshold(): number {
+        return averageAccel + 50
     }
 
     //% block="get last from sampleArray"
     //% advanced=true
-    export function getLastSample() {
+    export function getRawSample() {
         return sampleArray[sampleArray.length - 1]
     }
 
-    //% block="get last from smoothedValues"
+    //% block="get last from smoothed array"
     //% advanced=true
-    export function getLastSmoothedValue() {
+    export function getSmoothedSample() {
         return smoothedValues[smoothedValues.length - 1]
     }
 
     /** 
-    * move stepThreshold to between max and min
-    */
-    //% block="move stepThreshold value: $value, including any scaling factor"
+   * move stepThreshold to between max and min
+   */
+    //% block="move stepThreshold value: $value"
     //% advanced=true
     export function movestepThreshold(value: number) {
-        stepThreshold += Math.round((value * stepThresholdMultiplier / 100) / smoothedValues.length)
-        stepThreshold = Math.round(amp * stepThresholdMultiplier / 100) + Trough
+        stepThreshold += Math.round(value)
     }
+
+
 
     //% block
     export function getLatestSample() {
@@ -146,7 +143,6 @@ namespace stepcounter {
     }
 
     let smoothingCoefficient: number = 3
-
     //% block
     //% advanced=true
     export function smoothSample() {
@@ -174,6 +170,7 @@ namespace stepcounter {
             Peak = Math.max(smoothedValues[0], newSample)
         }
         amp = Peak - Trough
+        averageAccel += Math.round((newSample / smoothedValues.length) - (discard / smoothedValues.length))
         movestepThreshold(newSample - discard)
     }
 
@@ -197,15 +194,6 @@ namespace stepcounter {
     }
 
     /**
-     * set stepThreshold percentage (how hard your leg moves as it swings)
-     * @param value eg: 80
-     */
-    //% block="set stepThreshold Multipler to $value"
-    export function setThresholdMultipler(value: number) {
-        stepThresholdMultiplier = value
-    }
-
-    /**
      * set time per step in milliseconds (because people walk and run differently)
      * @param value eg: 500
      */
@@ -220,12 +208,12 @@ namespace stepcounter {
         smoothSample()  // now we work on smoothedValues instead of the noisy samples
 
         // checks if the peak in a new sample is really the Peak.
-        if (smoothedValues[smoothedValues.length - 1] > (smoothedValues[smoothedValues.length - 2])) {
+        if (smoothedValues[smoothedValues.length - 1] > (smoothedValues[smoothedValues.length - 2]) && (getSmoothedSample() > getStepThreshold())) {
             // we are rising.
             rising = 1
         }
 
-        else if (rising == 1 && isValidStepTime() && amp + Trough > stepThreshold && smoothedValues[smoothedValues.length - 1] < smoothedValues[smoothedValues.length - 2]) {
+        else if (rising == 1 && isValidStepTime() && (getSmoothedSample() < getStepThreshold()) && smoothedValues[smoothedValues.length - 1] < smoothedValues[smoothedValues.length - 2]) {
             rising = 0
             secretSteps += areWe()
             timeStamp()
